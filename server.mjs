@@ -2,7 +2,7 @@ import express from "express";
 import { customAlphabet } from 'nanoid'
 import cors from "cors";
 const nanoid = customAlphabet('1234567890', 20);
-import { MongoClient } from "mongodb"
+import { MongoClient, ObjectId} from "mongodb"
 
 
 import './config/index.mjs'
@@ -29,9 +29,8 @@ async function startServer() {
 
     
 
-    app.get("/", (req, res) => {
-      res.send("hello world!");
-    });
+    app.get("/", express.static("Frontend"));
+    // app.use(express.static(""))
 
 app.get("/products", async (req, res) => {
   const client = new MongoClient(mongodbURI);
@@ -39,7 +38,7 @@ app.get("/products", async (req, res) => {
   const productsCollection = database.collection('products');
 
   const query = {}
-  const findproducts = await productsCollection.find(query);
+  const findproducts = await productsCollection.find(query).toArray();
   await client.close();
 
   res.send({
@@ -54,7 +53,7 @@ app.get("/product/:id", async (req, res) => {
   const database = client.db('product');
   const productsCollection = database.collection('products');
 
-  const query = {_id: req.params.id}
+  const query = {_id:new ObjectId(req.params.id)}
   const findproduct = await productsCollection.findOne(query);
   await client.close();
 
@@ -71,6 +70,11 @@ app.get("/product/:id", async (req, res) => {
   //     isFound = i;
   //     break;
   //   }
+  // }
+
+  // if (!ObjectId.isValid(req.params.id)){
+  //    res.status(403),send({message : incorrect product id});
+  //   return;
   // }
 console.log(findproduct)
   if (!findproduct) {
@@ -100,19 +104,20 @@ app.post("/product", async (req, res) => {
       return;
     }
   
-    try {
-      const productsCollection = getDatabase().collection("products");
+    // try {
+      // const productsCollection = database.collection("products");
       const product = {
         name,
         price,
+        quantity,
         description,
       };
       await productsCollection.insertOne(product);
       res.status(201).send({ message: "Product Created" });
-    } catch (error) {
-      console.error("Error adding product:", error);
-      res.status(500).send("Error adding product.");
-    }
+    // } catch (error) {
+    //   console.error("Error adding product:", error);
+    //   res.status(500).send("Error adding product.");
+    // }
   });
   
 
@@ -146,7 +151,7 @@ app.put("/product/:id", async (req, res) => {
   const productsCollection = database.collection('products');
 
   const { name, price, description } = req.body;
-  const query = {_id : req.params.id}
+  const query = {_id :new ObjectId( req.params.id )}
   const updateproduct = await productsCollection.updateOne(query);
   await client.close();
 
@@ -186,39 +191,57 @@ app.put("/product/:id", async (req, res) => {
   }
 });
 
-app.delete("/product/:id", async (req, res) => {
-  const client = new MongoClient(mongodbURI);
-  const database = client.db('product');
-  const productsCollection = database.collection('products');
+// app.delete("/product/:id", async (req, res) => {
+//   const client = new MongoClient(mongodbURI);
+//   const database = client.db('product');
+//   const productsCollection = database.collection('products');
 
-  const query = {_id : req.params.id}
-  const deleteproduct = await productsCollection.deleteOne(query);
-  await client.close();
+//   const query = {_id : req.params.id}
+//   const deleteproduct = await productsCollection.deleteOne(query);
+//   await client.close();
 
-  // let isFound = false;
+//   // let isFound = false;
 
-  // for (let i = 0; i < products.length; i++) {
-  //   if (products[i].id === req.params.id) {
-  //     isFound = i;
-  //     break;
-  //   }
-  // }
-
-  if (!deleteproduct) {
-    res.status(404);
-    res.send({
-      message: "product not found"
-    });
+//   // for (let i = 0; i < products.length; i++) {
+//   //   if (products[i].id === req.params.id) {
+//   //     isFound = i;
+//   //     break;
+//   //   }
+//   // }
+// console.log('Deleted Record ', deleteproduct);
+//   if (!deleteproduct) {
+//     res.status(404);
+//     res.send({
+//       message: "product not found"
+//     });
     
-  } else {
-    deleteproduct.splice(deleteproduct, 1)
+//   } else {
+
+//     res.send({
+//       message: "product is deleted"
+//     });
+//   }
+// });
+
+app.delete("/product/:id", async (req, res) => {
+  if (!ObjectId.isValid(req.params.id)) {
+    res.status(403).send({ message: "incorrect product id" });
+    return;
+  }
+
+  try {
+    const productData = await productsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+    console.log("Product deleted: ", productData);
 
     res.send({
-      message: "product is deleted"
+      message: "product deleted successfully"
     });
+
+  } catch (error) {
+    console.log("error", error);
+    res.status(500).send({ message: "failed to delete product, please try later" });
   }
 });
-
 
 
   const port = process.env.PORT || 3000;

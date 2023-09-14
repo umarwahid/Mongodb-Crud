@@ -1,9 +1,19 @@
 import express from "express";
 import { customAlphabet } from 'nanoid'
-import cors from "cors";
 const nanoid = customAlphabet('1234567890', 20);
-import { MongoClient, ObjectId} from "mongodb"
+import { MongoClient, ObjectId} from "mongodb";
+import morgan from 'morgan';
+import cors from "cors";
+import path from 'path';
+import { PineconeClient } from "@pinecone-database/pinecone";
+import OpenAI from "openai";
+import "dotenv/config.js"
 
+const __dirname = path.resolve();
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 import './config/index.mjs'
 // console.log("dfdf",process.env.MONGODB_USERNAME);
@@ -15,242 +25,172 @@ const client = new MongoClient(mongodbURI, { useNewUrlParser: true, useUnifiedTo
 const database = client.db('product');
 const productsCollection = database.collection('products');
 
+const pinecone = new PineconeClient();
+await pinecone.init({
+  environment: process.env.PINECONE_ENVIRONMENT,
+  apiKey: process.env.PINECONE_API_KEY,
+});
+
+
 
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: "*" }));
+app.use(cors(["http://localhost:3000", "127.0.0.1", "https://ewrer234234.appspot.app.com"]));
 
-async function startServer() {
-  try {
-    await client.connect();
-    console.log("Connected to MongoDB");
-    const database = client.db('product');
-    const productsCollection = database.collection('products');
+app.use(morgan('combined'));
 
-    
 
-    app.get("/", express.static("Frontend"));
-    // app.use(express.static(""))
+app.get("/api/v1/stories", async (req, res) => {
 
-app.get("/products", async (req, res) => {
-  const client = new MongoClient(mongodbURI);
-  const database = client.db('product');
-  const productsCollection = database.collection('products');
+  const queryText = ""
 
-  const query = {}
-  const findproducts = await productsCollection.find(query).toArray();
-  await client.close();
 
-  res.send({
-    message: "all products",
-    data: findproducts,
+  const response = await openai.embeddings.create({
+    model: "text-embedding-ada-002",
+    input: queryText,
   });
-});
+  const vector = response?.data[0]?.embedding
+  console.log("vector: ", vector);
+  // [ 0.0023063174, -0.009358601, 0.01578391, ... , 0.01678391, ]
 
-//  https://baseurl.com/product/1231
-app.get("/product/:id", async (req, res) => {
-  const client = new MongoClient(mongodbURI);
-  const database = client.db('product');
-  const productsCollection = database.collection('products');
-
-  const query = {_id:new ObjectId(req.params.id)}
-  const findproduct = await productsCollection.findOne(query);
-  await client.close();
-
-  // console.log(typeof req.params.id)
-
-  // if (isNaN(req.params.id)) {
-  //   res.status(403).send("invalid product id")
-  // }
-
-  // let isFound = false;
-
-  // for (let i = 0; i < findproduct.length; i++) {
-  //   if (findproduct[i].id === req.params.id) {
-  //     isFound = i;
-  //     break;
-  //   }
-  // }
-
-  // if (!ObjectId.isValid(req.params.id)){
-  //    res.status(403),send({message : incorrect product id});
-  //   return;
-  // }
-console.log(findproduct)
-  if (!findproduct) {
-    res.status(404);
-    res.send({
-      message: "product not found"
-    });
-  } else {
-    res.send({
-      message: "product found ",
-      data: findproduct
-    });
-  }
-});
-
-
-app.post("/product", async (req, res) => {
-
-  const client = new MongoClient(mongodbURI);
-  const database = client.db('product');
-  const productsCollection = database.collection('products');
-
-  const { name, price, description } = req.body;
-  
-    if (!name || !price || !description) {
-      res.status(403).send(`Required parameter missing.`);
-      return;
+  const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
+  const queryResponse = await index.query({
+    queryRequest: {
+      vector: vector,
+      // id: "vec1",
+      topK: 100, // is ke qareeb qareeb ke 100 document chaye
+      includeValues: false, //vectoor wapis nhi chaye is lye false krdya
+      includeMetadata: true,
+      // namespace: process.env.PINECONE_NAME_SPACE
     }
-  
-    // try {
-      // const productsCollection = database.collection("products");
-      const product = {
-        name,
-        price,
-        quantity,
-        description,
-      };
-      await productsCollection.insertOne(product);
-      res.status(201).send({ message: "Product Created" });
-    // } catch (error) {
-    //   console.error("Error adding product:", error);
-    //   res.status(500).send("Error adding product.");
-    // }
   });
-  
 
-//   const { name, price, description } = req.body;
-//   const query = {name, price, description} 
-//   const addproduct = await productsCollection.insertOne(query);
-//   await client.close();
+  queryResponse.matches.map(eachMatch => {
+    console.log(`score ${eachMatch.score.toFixed(1)} => ${JSON.stringify(eachMatch.metadata)}\n\n`);
+  })
+  console.log(`${queryResponse.matches.length} records found `);
 
+  res.send(queryResponse.matches)
+});
 
-//   if (!req.body.name || !req.body.price || !req.body.description) {
+app.get("/api/v1/search", async (req, res) => {
 
-//     res.status(403).send(`required parameter missing.`);
-//       return;
-//   }
+  const queryText = req.query.q;
 
-//   addproduct.push({
-//     id: nanoid(),
-//     name: req.body.name,
-//     price: req.body.price,
-//     description: req.body.description,
-//   });
+  const response = await openai.embeddings.create({
+    model: "text-embedding-ada-002",
+    input: queryText,
+  });
+  const vector = response?.data[0]?.embedding
+  console.log("vector: ", vector);
+  // [ 0.0023063174, -0.009358601, 0.01578391, ... , 0.01678391, ]
 
+  const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
+  const queryResponse = await index.query({
+    queryRequest: {
+      vector: vector,
+      // id: "vec1",
+      topK: 20,
+      includeValues: false,
+      includeMetadata: true,
+      // namespace: process.env.PINECONE_NAME_SPACE
+    }
+  });
 
-//   res.status(201).send({ message: "Product Created" });
-// });
+  queryResponse.matches.map(eachMatch => {
+    console.log(`score ${eachMatch.score.toFixed(3)} => ${JSON.stringify(eachMatch.metadata)}\n\n`);
+  })
+  console.log(`${queryResponse.matches.length} records found `);
 
-
-app.put("/product/:id", async (req, res) => {
-  const client = new MongoClient(mongodbURI);
-  const database = client.db('product');
-  const productsCollection = database.collection('products');
-
-  const { name, price, description } = req.body;
-  const query = {_id :new ObjectId( req.params.id )}
-  const updateproduct = await productsCollection.updateOne(query);
-  await client.close();
-
-
-  if (!name && !price && !description) {
-
-    res.status(403).send(` required parameter missing. 
-      atleast one parameter is required: name, price or description to complete update`);
-  }
+  res.send(queryResponse.matches)
+});
 
 
-  // let isFound = false;
+app.post("/api/v1/story", async (req, res) => {
 
-  // for (let i = 0; i < products.length; i++) {
-  //   if (products[i].id === req.params.id) {
-  //     isFound = i;
-  //     break;
-  //   }
-  // }
+  // since pine cone can only store data in vector form (numeric representation of text)
+  // we will have to convert text data into vector of a certain dimension (1536 in case of openai)
+  const response = await openai.embeddings.create({
+    model: "text-embedding-ada-002",
+    input: `${req.body?.body}`,
+  });
+  console.log("response?.data: ", response?.data);
+  const vector = response?.data[0]?.embedding
+  console.log("vector: ", vector);
+  // [ 0.0023063174, -0.009358601, 0.01578391, ... , 0.01678391, ]
 
-  if (!updateproduct) {
-    res.status(404);
+
+  const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
+  const upsertRequest = {
+    vectors: [
+      {
+        id: nanoid(), // unique id, // unique id
+        values: vector,
+        metadata: {
+          body: req.body?.body,
+        }
+      }
+    ],
+    // namespace: process.env.PINECONE_NAME_SPACE,
+  };
+  try {
+    const upsertResponse = await index.upsert({ upsertRequest });
+    console.log("upsertResponse: ", upsertResponse);
+
     res.send({
-      message: "product not found"
+      message: "story created successfully"
     });
-  } else {
-
-    if (req.body.name) productsCollection[updateproduct].name = req.body.name
-    if (req.body.price) productsCollection[updateproduct].price = req.body.price
-    if (req.body.description) productsCollection[updateproduct].description = req.body.description
-
-    res.send({
-      message: "Product is Updated. ",
-      data: updateproduct[updateproduct]
+  } catch (e) {
+    console.log("error: ", e)
+    res.status(500).send({
+      message: "failed to create story, please try later"
     });
-    
   }
 });
 
-// app.delete("/product/:id", async (req, res) => {
-//   const client = new MongoClient(mongodbURI);
-//   const database = client.db('product');
-//   const productsCollection = database.collection('products');
+app.put("/api/v1/story/:id", async (req, res) => {
 
-//   const query = {_id : req.params.id}
-//   const deleteproduct = await productsCollection.deleteOne(query);
-//   await client.close();
 
-//   // let isFound = false;
 
-//   // for (let i = 0; i < products.length; i++) {
-//   //   if (products[i].id === req.params.id) {
-//   //     isFound = i;
-//   //     break;
-//   //   }
-//   // }
-// console.log('Deleted Record ', deleteproduct);
-//   if (!deleteproduct) {
-//     res.status(404);
-//     res.send({
-//       message: "product not found"
-//     });
-    
-//   } else {
+});
 
-//     res.send({
-//       message: "product is deleted"
-//     });
-//   }
-// });
-
-app.delete("/product/:id", async (req, res) => {
-  if (!ObjectId.isValid(req.params.id)) {
-    res.status(403).send({ message: "incorrect product id" });
-    return;
-  }
+app.delete("/api/v1/story/:id", async (req, res) => {
 
   try {
-    const productData = await productsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
-    console.log("Product deleted: ", productData);
+    const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
+    const deleteResponse = await index.delete1({
+      ids: [req.params.id],
+      // namespace: process.env.PINECONE_NAME_SPACE
+    })
+
+    console.log("deleteResponse: ", deleteResponse);
 
     res.send({
-      message: "product deleted successfully"
+      message: "story deleted successfully"
     });
 
-  } catch (error) {
-    console.log("error", error);
-    res.status(500).send({ message: "failed to delete product, please try later" });
+  } catch (e) {
+    console.log("error: ", e)
+    res.status(500).send({
+      message: "failed to delete story, please try later"
+    });
   }
+
 });
 
+//  baseurl/filename.txt
+app.get(express.static(path.join(__dirname, "./web/build")));
+app.use("/", express.static(path.join(__dirname, "./web/build")));
 
-  const port = process.env.PORT || 3000;
-  app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`);
-  });
-} catch (err) {
-  console.error("Error connecting to MongoDB:", err);
-}
-}
+app.use('/static', express.static(path.join(__dirname, 'static')))
 
-startServer();
+
+app.use((req, res) => {
+  res.status(404).send("not found");
+})
+
+
+const port = process.env.PORT || 5001;
+app.listen(port, () => {
+  console.log(`Example app listening on port ${port}`);
+});
